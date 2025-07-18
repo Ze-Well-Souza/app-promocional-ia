@@ -1,0 +1,195 @@
+classDiagram
+    class App {
+        +render() JSX.Element
+        +main() void
+    }
+
+    class ContentStore {
+        -content: ContentData
+        -apiKeys: APIKeys
+        -settings: UserSettings
+        +setContent(content: ContentData) void
+        +getContent() ContentData
+        +setAPIKey(provider: string, key: string) void
+        +getAPIKey(provider: string) string
+        +saveToLocal() Promise~void~
+        +loadFromLocal() Promise~void~
+    }
+
+    class APIService {
+        -httpClient: AxiosInstance
+        +generateText(prompt: string, provider: string) Promise~TextResult~
+        +generateImage(prompt: string, provider: string) Promise~ImageResult~
+        +validateAPIKey(provider: string, key: string) Promise~boolean~
+        -handleError(error: AxiosError) APIError
+    }
+
+    class OpenAIService {
+        -apiKey: string
+        -baseURL: string
+        +generateText(prompt: string) Promise~TextResult~
+        +generateImage(prompt: string) Promise~ImageResult~
+        +validateKey() Promise~boolean~
+    }
+
+    class ClaudeService {
+        -apiKey: string
+        -baseURL: string
+        +generateText(prompt: string) Promise~TextResult~
+        +validateKey() Promise~boolean~
+    }
+
+    class GeminiService {
+        -apiKey: string
+        -baseURL: string
+        +generateText(prompt: string) Promise~TextResult~
+        +generateImage(prompt: string) Promise~ImageResult~
+        +validateKey() Promise~boolean~
+    }
+
+    class GrookService {
+        -apiKey: string
+        -baseURL: string
+        +generateText(prompt: string) Promise~TextResult~
+        +validateKey() Promise~boolean~
+    }
+
+    class DeepseekService {
+        -apiKey: string
+        -baseURL: string
+        +generateText(prompt: string) Promise~TextResult~
+        +validateKey() Promise~boolean~
+    }
+
+    class StorageService {
+        -db: Dexie
+        +saveContent(content: ContentData) Promise~void~
+        +loadContent(id: string) Promise~ContentData~
+        +listContents() Promise~ContentData[]~
+        +deleteContent(id: string) Promise~void~
+        +encryptAPIKey(key: string) Promise~string~
+        +decryptAPIKey(encryptedKey: string) Promise~string~
+    }
+
+    class ContentScreen {
+        -store: ContentStore
+        -apiService: APIService
+        +handleSubmit(data: FormData) Promise~void~
+        +generateText() Promise~void~
+        +generateImage() Promise~void~
+        +render() JSX.Element
+    }
+
+    class CustomizeScreen {
+        -store: ContentStore
+        +updateColors(colors: ColorSettings) void
+        +updateText(text: string) void
+        +render() JSX.Element
+    }
+
+    class PreviewScreen {
+        -store: ContentStore
+        +shareToWhatsApp() void
+        +saveLocally() Promise~void~
+        +copyToClipboard() void
+        +render() JSX.Element
+    }
+
+    class WhatsAppPreview {
+        -content: ContentData
+        +render() JSX.Element
+    }
+
+    class InstagramPreview {
+        -content: ContentData
+        +render() JSX.Element
+    }
+
+    class ErrorBoundary {
+        -hasError: boolean
+        +componentDidCatch(error: Error) void
+        +render() JSX.Element
+    }
+
+    class ContentData {
+        +id: string
+        +description: string
+        +promotionType: PromotionType
+        +generatedText: string
+        +generatedImage: string
+        +colors: ColorSettings
+        +createdAt: Date
+        +updatedAt: Date
+    }
+
+    class APIKeys {
+        +openai: string
+        +claude: string
+        +gemini: string
+        +grook: string
+        +deepseek: string
+    }
+
+    class ColorSettings {
+        +background: string
+        +text: string
+        +accent: string
+    }
+
+    class TextResult {
+        +content: string
+        +provider: string
+        +tokens_used: number
+        +cost: number
+    }
+
+    class ImageResult {
+        +url: string
+        +provider: string
+        +cost: number
+    }
+
+    class APIError {
+        +message: string
+        +code: string
+        +provider: string
+        +retryable: boolean
+    }
+
+    %% Relationships
+    App --> ContentStore
+    App --> ContentScreen
+    App --> CustomizeScreen
+    App --> PreviewScreen
+    App --> ErrorBoundary
+
+    ContentStore --> StorageService
+    ContentStore --> ContentData
+    ContentStore --> APIKeys
+
+    APIService --> OpenAIService
+    APIService --> ClaudeService
+    APIService --> GeminiService
+    APIService --> GrookService
+    APIService --> DeepseekService
+
+    ContentScreen --> APIService
+    ContentScreen --> ContentStore
+    CustomizeScreen --> ContentStore
+    PreviewScreen --> ContentStore
+    PreviewScreen --> WhatsAppPreview
+    PreviewScreen --> InstagramPreview
+
+    OpenAIService --> TextResult
+    OpenAIService --> ImageResult
+    ClaudeService --> TextResult
+    GeminiService --> TextResult
+    GeminiService --> ImageResult
+    GrookService --> TextResult
+    DeepseekService --> TextResult
+
+    ContentData --> ColorSettings
+    StorageService --> ContentData
+    StorageService --> APIKeys
+
+    APIService --> APIError

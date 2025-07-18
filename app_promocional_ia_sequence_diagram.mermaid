@@ -1,0 +1,90 @@
+sequenceDiagram
+    participant U as User
+    participant CS as ContentScreen
+    participant Store as ContentStore
+    participant API as APIService
+    participant OpenAI as OpenAIService
+    participant Storage as StorageService
+    participant CustS as CustomizeScreen
+    participant PrevS as PreviewScreen
+    participant WA as WhatsAppPreview
+
+    %% Application Initialization
+    U->>CS: Open application
+    CS->>Store: new ContentStore()
+    Store->>Storage: loadFromLocal()
+    Storage-->>Store: return saved data
+    Store-->>CS: initialized store
+
+    %% Content Creation Flow
+    U->>CS: Enter product description
+    U->>CS: Select promotion type
+    CS->>Store: setContent({description, promotionType})
+    
+    U->>CS: Click "Generate Text"
+    CS->>API: generateText(prompt, "openai")
+    API->>Store: getAPIKey("openai")
+    Store-->>API: return encrypted key
+    API->>API: decryptAPIKey(key)
+    API->>OpenAI: new OpenAIService(decryptedKey)
+    OpenAI->>OpenAI: generateText(prompt)
+    
+    alt API Success
+        OpenAI-->>API: return TextResult
+        API-->>CS: return generated text
+        CS->>Store: setContent({generatedText})
+        CS->>Storage: saveContent(content)
+        CS->>U: Display success message
+    else API Error
+        OpenAI-->>API: throw APIError
+        API->>API: handleError(error)
+        API-->>CS: return APIError
+        CS->>U: Display error message
+    end
+
+    %% Image Generation Flow
+    U->>CS: Click "Generate Image"
+    CS->>API: generateImage(prompt, "openai")
+    API->>OpenAI: generateImage(prompt)
+    OpenAI-->>API: return ImageResult
+    API-->>CS: return image URL
+    CS->>Store: setContent({generatedImage})
+    CS->>Storage: saveContent(content)
+
+    %% Customization Flow
+    U->>CS: Navigate to Customize
+    CS->>CustS: route to customize screen
+    CustS->>Store: getContent()
+    Store-->>CustS: return current content
+    CustS->>U: Display customization UI
+
+    U->>CustS: Change colors
+    CustS->>Store: setContent({colors})
+    U->>CustS: Edit text
+    CustS->>Store: setContent({generatedText})
+
+    %% Preview Flow
+    U->>CustS: Navigate to Preview
+    CustS->>PrevS: route to preview screen
+    PrevS->>Store: getContent()
+    Store-->>PrevS: return final content
+    PrevS->>WA: new WhatsAppPreview(content)
+    WA-->>PrevS: rendered preview
+    PrevS->>U: Display previews
+
+    %% Sharing Flow
+    U->>PrevS: Click "Share WhatsApp"
+    PrevS->>PrevS: shareToWhatsApp()
+    PrevS->>U: Open WhatsApp with content
+
+    U->>PrevS: Click "Save Locally"
+    PrevS->>Storage: saveContent(content)
+    Storage-->>PrevS: confirm saved
+    PrevS->>U: Display success notification
+
+    %% Error Handling
+    Note over API, OpenAI: Rate limit exceeded
+    OpenAI-->>API: RateLimitError
+    API->>API: handleError(RateLimitError)
+    API->>CS: suggest retry in X minutes
+    CS->>U: Display retry suggestion
