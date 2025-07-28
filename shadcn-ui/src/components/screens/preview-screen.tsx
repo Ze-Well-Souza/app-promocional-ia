@@ -99,17 +99,17 @@ export function PreviewScreen({ onBack, onRestart }: PreviewScreenProps) {
   };
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <Button variant="outline" onClick={onBack}>
+    <div className="max-w-6xl mx-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
+        <Button variant="outline" onClick={onBack} className="w-full sm:w-auto">
           <ArrowLeft className="w-4 h-4 mr-2" />
           Voltar
         </Button>
-        <div className="text-center">
-          <h1 className="text-3xl font-bold">Visualizar e Compartilhar</h1>
-          <p className="text-muted-foreground">Veja como ficará seu conteúdo nas redes sociais</p>
+        <div className="text-center order-first sm:order-none">
+          <h1 className="text-2xl sm:text-3xl font-bold">Visualizar e Compartilhar</h1>
+          <p className="text-sm sm:text-base text-muted-foreground">Veja como ficará seu conteúdo nas redes sociais</p>
         </div>
-        <Button onClick={onRestart} variant="outline">
+        <Button onClick={onRestart} variant="outline" className="w-full sm:w-auto">
           Criar Novo
         </Button>
       </div>
@@ -121,7 +121,7 @@ export function PreviewScreen({ onBack, onRestart }: PreviewScreenProps) {
         </Alert>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
         {/* Left Panel - Previews */}
         <div className="space-y-6">
           <Card>

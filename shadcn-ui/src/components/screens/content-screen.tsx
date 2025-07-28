@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { AlertCircle, Loader2, Settings, Wand2, Image, Link, Sparkles, Zap } from 'lucide-react';
+import { AlertCircle, Loader2, Settings, Wand2, Image, Link, Sparkles } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -16,6 +16,11 @@ import { useContentStore } from '@/store/content-store';
 import { APIService } from '@/lib/api-services';
 import { StorageService } from '@/lib/storage';
 import { PROMOTION_TYPES, AI_PROVIDERS, PromotionType, AIProvider } from '@/types';
+import { ApiKeyInput } from '@/components/ui/api-key-input';
+import { LoadingPanel } from '@/components/ui/loading-panel';
+import { DetailedLoading } from '@/components/ui/detailed-loading';
+import { useDetailedLoading } from '@/hooks/use-detailed-loading';
+import { useSimpleHaptic } from '@/hooks/use-haptic-feedback';
 import { toast } from 'sonner';
 
 const formSchema = z.object({
@@ -33,10 +38,31 @@ interface ContentScreenProps {
 }
 
 export function ContentScreen({ onNext }: ContentScreenProps) {
-  const { content, setContent, apiKeys, loadAPIKeys, setAPIKey, isLoading, error, setLoading, setError } = useContentStore();
+  const { 
+    content, 
+    setContent, 
+    apiKeys, 
+    loadAPIKeys, 
+    setAPIKey, 
+    validateAPIKey,
+    isLoading, 
+    error, 
+    setLoading, 
+    setError,
+    clearError
+  } = useContentStore();
+  const {
+    loadingStates,
+    isLoading: isDetailedLoading,
+    withLoading,
+    startOperation,
+    updateProgress,
+    completeOperation
+  } = useDetailedLoading();
+  const haptic = useSimpleHaptic();
   const [apiService] = useState(new APIService());
   const [showApiConfig, setShowApiConfig] = useState(false);
-  const [localApiKeys, setLocalApiKeys] = useState(apiKeys);
+
   const [isScrapingUrl, setIsScrapingUrl] = useState(false);
   const [suggestedPrice, setSuggestedPrice] = useState<number | null>(null);
   const [priceRange, setPriceRange] = useState<{min: number; max: number} | null>(null);
@@ -56,9 +82,7 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
     loadAPIKeys();
   }, [loadAPIKeys]);
 
-  React.useEffect(() => {
-    setLocalApiKeys(apiKeys);
-  }, [apiKeys]);
+
 
   const buildPrompt = (description: string, promotionType: PromotionType, price?: number) => {
     const typePrompts = {
@@ -84,18 +108,25 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
     return `Professional promotional image for ${promotionType}: ${description}. High quality, modern design, suitable for social media, Brazilian market`;
   };
 
-  const handleScrapeUrl = async () => {
+  const handleScrapeUrl = withLoading('urlScraping', 'scraping_url', async () => {
     const url = form.getValues('productUrl');
     if (!url) {
       setError('Digite uma URL para extrair informações do produto');
+      haptic.error();
       return;
     }
 
+    haptic.light();
+    setIsScrapingUrl(true);
+    setError(null);
+    
     try {
-      setIsScrapingUrl(true);
-      setError(null);
+      updateProgress('urlScraping', 20, 'Conectando com a URL...');
       
+      updateProgress('urlScraping', 50, 'Extraindo informações do produto...');
       const scrapedData = await StorageService.scrapeProductFromURL(url);
+      
+      updateProgress('urlScraping', 80, 'Processando dados extraídos...');
       
       // Update form with scraped data
       const enhancedDescription = `${scrapedData.title}\n\n${scrapedData.description}`;
@@ -113,124 +144,186 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
         form.setValue('productPrice', scrapedData.suggestedPrice);
       }
       
+      updateProgress('urlScraping', 100, 'Dados extraídos com sucesso!');
+      
+      haptic.success();
       toast.success('Informações extraídas com sucesso! ' + 
         (scrapedData.suggestedPrice ? `Preço médio: R$ ${scrapedData.suggestedPrice.toFixed(2)}` : ''));
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Erro ao extrair informações da URL';
       setError(errorMessage);
+      haptic.error();
       toast.error(errorMessage);
+      throw error;
     } finally {
       setIsScrapingUrl(false);
     }
-  };
+  });
 
-  const handleGenerateText = async () => {
+  const handleGenerateText = withLoading('textGeneration', 'generating_text', async () => {
     const formData = form.getValues();
-    const apiKey = await useContentStore.getState().getAPIKey(formData.selectedProvider);
     
-    if (!apiKey) {
-      setError(`Chave de API do ${AI_PROVIDERS[formData.selectedProvider]} não configurada`);
+    if (!formData.description.trim()) {
+      haptic.error();
+      toast.error('Por favor, descreva seu produto/serviço');
       return;
     }
 
+    haptic.medium();
+
+    updateProgress('textGeneration', 10, 'Verificando configurações...');
+    
+    const apiKey = await useContentStore.getState().getAPIKey(formData.selectedProvider);
+    if (!apiKey) {
+      toast.error(`Chave de API do ${AI_PROVIDERS[formData.selectedProvider]} não configurada`);
+      setShowApiConfig(true);
+      return;
+    }
+
+    updateProgress('textGeneration', 25, 'Validando chave de API...');
+    
+    // Validate API key before generating
+    const isValidKey = await validateAPIKey(formData.selectedProvider, apiKey);
+    if (!isValidKey) {
+      toast.error(`Chave de API do ${AI_PROVIDERS[formData.selectedProvider]} inválida`);
+      setShowApiConfig(true);
+      return;
+    }
+
+    setLoading(true);
+    clearError();
+
     try {
-      setLoading(true);
-      setError(null);
-      
+      updateProgress('textGeneration', 40, 'Preparando prompt...');
       const prompt = buildPrompt(formData.description, formData.promotionType, formData.productPrice);
+      
+      updateProgress('textGeneration', 60, 'Gerando texto com IA...');
       const result = await apiService.generateText(prompt, formData.selectedProvider, apiKey);
+      
+      updateProgress('textGeneration', 90, 'Finalizando...');
       
       setContent({
         description: formData.description,
         promotionType: formData.promotionType,
         selectedProvider: formData.selectedProvider,
-        generatedText: result.content
+        generatedText: result.content,
+        updatedAt: new Date()
       });
       
+      updateProgress('textGeneration', 100, 'Texto gerado com sucesso!');
+      haptic.success();
       toast.success('Texto gerado com sucesso!');
 
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro ao gerar texto';
+    } catch (error: any) {
+      console.error('Error generating text:', error);
+      const errorMessage = error?.message || 'Erro ao gerar texto. Verifique sua chave de API e tente novamente.';
       setError(errorMessage);
-      toast.error(errorMessage);
+      haptic.error();
+      toast.error('Erro ao gerar texto');
+      throw error;
     } finally {
       setLoading(false);
     }
-  };
+  });
 
-  const handleGenerateImage = async () => {
+  const handleGenerateImage = withLoading('imageGeneration', 'generating_image', async () => {
     const formData = form.getValues();
+    
+    if (!formData.description.trim()) {
+      haptic.error();
+      toast.error('Por favor, descreva seu produto/serviço primeiro');
+      return;
+    }
+
+    haptic.medium();
+
+    updateProgress('imageGeneration', 10, 'Verificando configurações...');
+    
     const apiKey = await useContentStore.getState().getAPIKey(formData.selectedProvider);
     
     if (!apiKey) {
-      setError(`Chave de API do ${AI_PROVIDERS[formData.selectedProvider]} não configurada`);
+      toast.error(`Chave de API do ${AI_PROVIDERS[formData.selectedProvider]} não configurada`);
+      setShowApiConfig(true);
       return;
     }
 
     if (!['openai', 'gemini'].includes(formData.selectedProvider)) {
-      setError('Geração de imagem disponível apenas para OpenAI e Gemini');
+      toast.error('Geração de imagem disponível apenas para OpenAI e Gemini');
+      return;
+    }
+
+    updateProgress('imageGeneration', 25, 'Validando chave de API...');
+    
+    // Validate API key before generating
+    const isValidKey = await validateAPIKey(formData.selectedProvider, apiKey);
+    if (!isValidKey) {
+      toast.error(`Chave de API do ${AI_PROVIDERS[formData.selectedProvider]} inválida`);
+      setShowApiConfig(true);
       return;
     }
 
     try {
       setLoading(true);
-      setError(null);
+      clearError();
       
+      updateProgress('imageGeneration', 40, 'Preparando prompt de imagem...');
       const prompt = buildImagePrompt(formData.description, formData.promotionType);
+      
+      updateProgress('imageGeneration', 60, 'Gerando imagem com IA...');
       const result = await apiService.generateImage(prompt, formData.selectedProvider, apiKey);
       
+      updateProgress('imageGeneration', 90, 'Processando resultado...');
+      
       setContent({
-        generatedImage: result.url
+        generatedImage: result.url,
+        updatedAt: new Date()
       });
       
+      updateProgress('imageGeneration', 100, 'Imagem gerada com sucesso!');
+      haptic.success();
       toast.success('Imagem gerada com sucesso!');
 
-    } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Erro ao gerar imagem';
+    } catch (error: any) {
+      console.error('Error generating image:', error);
+      const errorMessage = error?.message || 'Erro ao gerar imagem. Verifique sua chave de API e tente novamente.';
       setError(errorMessage);
-      toast.error(errorMessage);
+      haptic.error();
+      toast.error('Erro ao gerar imagem');
+      throw error;
     } finally {
       setLoading(false);
     }
-  };
+  });
 
-  const handleSaveApiKeys = async () => {
-    try {
-      for (const [provider, key] of Object.entries(localApiKeys)) {
-        if (key && key !== apiKeys[provider as keyof typeof apiKeys]) {
-          await setAPIKey(provider as keyof typeof apiKeys, key);
-        }
-      }
-      await loadAPIKeys(); // Reload to confirm save
-      setShowApiConfig(false);
-      toast.success('Chaves de API salvas com sucesso!');
-    } catch (error) {
-      toast.error('Erro ao salvar chaves de API');
-    }
-  };
+
 
   const canProceed = content.generatedText.length > 0;
 
   return (
-    <div className="max-w-6xl mx-auto p-6 space-y-8">
+    <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-6 sm:space-y-8 animate-fade-in">
       {/* Modern Header */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 p-8 text-white">
+      <div className="relative overflow-hidden rounded-2xl sm:rounded-3xl bg-gradient-to-r from-purple-600 via-blue-600 to-cyan-500 p-6 sm:p-8 text-white animate-scale-in">
         <div className="absolute inset-0 bg-black/20"></div>
-        <div className="relative z-10 flex items-center justify-between">
+        <div className="relative z-10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
           <div className="space-y-2">
-            <h1 className="text-4xl font-bold flex items-center gap-3">
-              <Sparkles className="w-10 h-10" />
+            <h1 className="text-2xl sm:text-4xl font-bold flex items-center gap-2 sm:gap-3">
+              <Sparkles className="w-8 h-8 sm:w-10 sm:h-10 animate-pulse" />
               Criar Conteúdo Promocional
             </h1>
-            <p className="text-lg opacity-90">
+            <p className="text-base sm:text-lg opacity-90">
               Transforme ideias em campanhas irresistíveis com IA
             </p>
           </div>
           
           <Dialog open={showApiConfig} onOpenChange={setShowApiConfig}>
             <DialogTrigger asChild>
-              <Button variant="secondary" size="lg" className="shadow-lg">
-                <Settings className="w-5 h-5 mr-2" />
+              <Button 
+                variant="secondary" 
+                size="lg" 
+                className="shadow-lg w-full sm:w-auto transition-all duration-300 hover:scale-105 hover:shadow-xl"
+                onClick={() => haptic.light()}
+              >
+                <Settings className="w-4 h-4 sm:w-5 sm:h-5 mr-2" />
                 Configurar APIs
               </Button>
             </DialogTrigger>
@@ -243,25 +336,16 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
               </DialogHeader>
               <div className="space-y-4">
                 {Object.entries(AI_PROVIDERS).map(([key, name]) => (
-                  <div key={key} className="space-y-2">
-                    <Label htmlFor={key} className="text-sm font-semibold">{name}</Label>
-                    <Input
-                      id={key}
-                      type="password"
-                      placeholder={`Chave de API do ${name}`}
-                      value={localApiKeys[key as keyof typeof localApiKeys]}
-                      onChange={(e) => setLocalApiKeys(prev => ({
-                        ...prev,
-                        [key]: e.target.value
-                      }))}
-                      className="bg-white/50"
-                    />
-                  </div>
+                  <ApiKeyInput
+                    key={key}
+                    provider={key as AIProvider}
+                    label={name}
+                    onSave={(provider, apiKey) => {
+                      setAPIKey(provider, apiKey);
+                      toast.success(`Chave ${name} salva com sucesso!`);
+                    }}
+                  />
                 ))}
-                <Button onClick={handleSaveApiKeys} className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700">
-                  <Zap className="w-4 h-4 mr-2" />
-                  Salvar Chaves
-                </Button>
               </div>
             </DialogContent>
           </Dialog>
@@ -270,11 +354,14 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
         <div className="absolute -top-6 -left-6 w-24 h-24 bg-white/10 rounded-full blur-xl"></div>
       </div>
 
+      {/* Loading Panel */}
+      <LoadingPanel className="mb-6" />
+
       {/* URL Scraping Section */}
-      <Card className="border-0 shadow-xl bg-gradient-to-br from-orange-50 to-red-50">
+      <Card className="border-0 shadow-xl bg-gradient-to-br from-orange-50 to-red-50 animate-slide-in transition-all duration-300 hover:shadow-2xl">
         <CardHeader className="pb-4">
           <CardTitle className="flex items-center gap-3 text-2xl">
-            <Link className="w-7 h-7 text-orange-600" />
+            <Link className="w-7 h-7 text-orange-600 transition-transform duration-300 hover:scale-110" />
             Extrair de URL de Produto
           </CardTitle>
           <CardDescription className="text-base">
@@ -282,7 +369,7 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex gap-4">
+          <div className="flex flex-col sm:flex-row gap-4">
             <div className="flex-1 space-y-2">
               <Input
                 placeholder="https://exemplo.com/produto..."
@@ -298,7 +385,7 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
               type="button"
               onClick={handleScrapeUrl}
               disabled={isScrapingUrl || !form.watch('productUrl')}
-              className="h-12 px-6 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600"
+              className="h-12 px-6 bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 w-full sm:w-auto transition-all duration-300 hover:scale-105 hover:shadow-lg disabled:hover:scale-100"
             >
               {isScrapingUrl ? (
                 <Loader2 className="w-5 h-5 mr-2 animate-spin" />
@@ -311,7 +398,7 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
           
           {/* Price Information */}
           {(suggestedPrice || form.watch('productPrice')) && (
-            <Card className="mt-4 border-amber-200 bg-amber-50">
+            <Card className="mt-4 border-amber-200 bg-amber-50 animate-slide-in transition-all duration-300 hover:shadow-lg">
               <CardHeader className="pb-4">
                 <CardTitle className="flex items-center gap-3 text-lg text-amber-800">
                   💰 Informações de Preço
@@ -347,8 +434,11 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => form.setValue('productPrice', suggestedPrice)}
-                      className="border-amber-300 hover:bg-amber-100"
+                      onClick={() => {
+                        haptic.light();
+                        form.setValue('productPrice', suggestedPrice);
+                      }}
+                      className="border-amber-300 hover:bg-amber-100 transition-all duration-300 hover:scale-105 hover:shadow-md"
                     >
                       Usar Preço Médio Sugerido (R$ {suggestedPrice.toFixed(2)})
                     </Button>
@@ -361,10 +451,10 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
       </Card>
 
       {/* Main Content Creation */}
-      <Card className="border-0 shadow-2xl bg-gradient-to-br from-blue-50 to-purple-50">
+      <Card className="border-0 shadow-2xl bg-gradient-to-br from-blue-50 to-purple-50 animate-slide-in transition-all duration-300 hover:shadow-3xl">
         <CardHeader className="pb-6">
           <CardTitle className="flex items-center gap-3 text-2xl">
-            <Wand2 className="w-7 h-7 text-blue-600" />
+            <Wand2 className="w-7 h-7 text-blue-600 transition-transform duration-300 hover:scale-110" />
             Descreva seu Produto/Serviço
           </CardTitle>
           <CardDescription className="text-base">
@@ -386,7 +476,7 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
               )}
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
               <div className="space-y-2">
                 <Label className="text-lg font-semibold">🎯 Tipo de Promoção</Label>
                 <Select 
@@ -432,17 +522,17 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
               </div>
             </div>
 
-            <div className="flex gap-6">
+            <div className="flex flex-col sm:flex-row gap-4 sm:gap-6">
               <Button
                 type="button"
                 onClick={handleGenerateText}
                 disabled={isLoading || !form.watch('description')}
-                className="flex-1 h-14 text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg"
+                className="flex-1 h-12 sm:h-14 text-base sm:text-lg bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl disabled:hover:scale-100"
               >
                 {isLoading ? (
-                  <Loader2 className="w-5 h-5 mr-3 animate-spin" />
+                  <Loader2 className="w-4 sm:w-5 h-4 sm:h-5 mr-2 sm:mr-3 animate-spin" />
                 ) : (
-                  <Wand2 className="w-5 h-5 mr-3" />
+                  <Wand2 className="w-4 sm:w-5 h-4 sm:h-5 mr-2 sm:mr-3" />
                 )}
                 Gerar Texto
               </Button>
@@ -452,12 +542,12 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
                 onClick={handleGenerateImage}
                 disabled={isLoading || !form.watch('description') || !['openai', 'gemini'].includes(form.watch('selectedProvider'))}
                 variant="outline"
-                className="flex-1 h-14 text-lg border-2 border-purple-300 hover:bg-purple-50 shadow-lg"
+                className="flex-1 h-12 sm:h-14 text-base sm:text-lg border-2 border-purple-300 hover:bg-purple-50 shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl disabled:hover:scale-100"
               >
                 {isLoading ? (
-                  <Loader2 className="w-5 h-5 mr-3 animate-spin" />
+                  <Loader2 className="w-4 sm:w-5 h-4 sm:h-5 mr-2 sm:mr-3 animate-spin" />
                 ) : (
-                  <Image className="w-5 h-5 mr-3" />
+                  <Image className="w-4 sm:w-5 h-4 sm:h-5 mr-2 sm:mr-3" />
                 )}
                 Gerar Imagem
               </Button>
@@ -474,10 +564,10 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
       )}
 
       {content.generatedText && (
-        <Card className="border-0 shadow-xl bg-gradient-to-br from-green-50 to-emerald-50">
+        <Card className="border-0 shadow-xl bg-gradient-to-br from-green-50 to-emerald-50 animate-fade-in transition-all duration-300 hover:shadow-2xl">
           <CardHeader>
             <CardTitle className="flex items-center gap-3 text-2xl">
-              <Sparkles className="w-7 h-7 text-green-600" />
+              <Sparkles className="w-7 h-7 text-green-600 animate-pulse" />
               Texto Gerado
             </CardTitle>
           </CardHeader>
@@ -490,9 +580,12 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
                 Gerado com {AI_PROVIDERS[content.selectedProvider]}
               </Badge>
               <Button 
-                onClick={onNext} 
+                onClick={() => {
+                  haptic.light();
+                  onNext();
+                }} 
                 disabled={!canProceed}
-                className="px-8 py-3 text-lg bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-lg"
+                className="px-6 sm:px-8 py-2 sm:py-3 text-base sm:text-lg bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 shadow-lg transition-all duration-300 hover:scale-105 hover:shadow-xl disabled:hover:scale-100"
               >
                 Personalizar →
               </Button>
@@ -502,19 +595,19 @@ export function ContentScreen({ onNext }: ContentScreenProps) {
       )}
 
       {content.generatedImage && (
-        <Card className="border-0 shadow-xl bg-gradient-to-br from-indigo-50 to-blue-50">
+        <Card className="border-0 shadow-xl bg-gradient-to-br from-indigo-50 to-blue-50 animate-fade-in transition-all duration-300 hover:shadow-2xl">
           <CardHeader>
             <CardTitle className="flex items-center gap-3 text-2xl">
-              <Image className="w-7 h-7 text-indigo-600" />
+              <Image className="w-7 h-7 text-indigo-600 transition-transform duration-300 hover:scale-110" />
               Imagem do Produto
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="bg-white/80 p-4 rounded-xl border border-indigo-200">
+            <div className="bg-white/80 p-4 rounded-xl border border-indigo-200 transition-all duration-300 hover:shadow-lg">
               <img 
                 src={content.generatedImage} 
                 alt="Imagem promocional gerada"
-                className="w-full max-w-md mx-auto rounded-lg shadow-lg"
+                className="w-full max-w-md mx-auto rounded-lg shadow-lg transition-transform duration-300 hover:scale-105"
               />
             </div>
           </CardContent>

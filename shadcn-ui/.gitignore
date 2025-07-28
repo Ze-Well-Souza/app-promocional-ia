@@ -9,8 +9,21 @@ lerna-debug.log*
 
 node_modules
 dist
+dist-staging
 dist-ssr
 *.local
+
+# Environment files
+.env.local
+.env.*.local
+.env.development.local
+.env.staging.local
+.env.production.local
+
+# Staging specific
+staging-logs/
+test-results/
+coverage/
 
 # Editor directories and files
 .vscode/*

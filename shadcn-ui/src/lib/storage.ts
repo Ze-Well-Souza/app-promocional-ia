@@ -27,55 +27,101 @@ export const db = new AppDatabase();
 
 export class StorageService {
   static async saveContent(content: ContentData): Promise<void> {
-    await db.contents.put(content);
+    try {
+      await db.contents.put(content);
+      console.log('Content saved successfully:', content.id);
+    } catch (error) {
+      console.error('Error saving content:', error);
+      throw new Error('Falha ao salvar conteúdo');
+    }
   }
 
   static async loadContent(id: string): Promise<ContentData | undefined> {
-    return await db.contents.get(id);
+    try {
+      const content = await db.contents.get(id);
+      console.log('Content loaded:', id, content ? 'found' : 'not found');
+      return content;
+    } catch (error) {
+      console.error('Error loading content:', error);
+      throw new Error('Falha ao carregar conteúdo');
+    }
   }
 
   static async listContents(): Promise<ContentData[]> {
-    return await db.contents.orderBy('updatedAt').reverse().toArray();
+    try {
+      const contents = await db.contents.orderBy('updatedAt').reverse().toArray();
+      console.log('Contents listed:', contents.length, 'items');
+      return contents;
+    } catch (error) {
+      console.error('Error listing contents:', error);
+      throw new Error('Falha ao listar conteúdos');
+    }
   }
 
   static async deleteContent(id: string): Promise<void> {
-    await db.contents.delete(id);
+    try {
+      await db.contents.delete(id);
+      console.log('Content deleted:', id);
+    } catch (error) {
+      console.error('Error deleting content:', error);
+      throw new Error('Falha ao deletar conteúdo');
+    }
   }
 
   static async saveAPIKey(provider: string, key: string): Promise<void> {
-    // Remove existing key for this provider
-    await db.apiKeys.where('provider').equals(provider).delete();
-    
-    // Add new key
-    await db.apiKeys.add({
-      provider,
-      key, // Store directly for now
-      createdAt: new Date()
-    });
+    try {
+      // Remove existing key for this provider
+      await db.apiKeys.where('provider').equals(provider).delete();
+      
+      // Add new key
+      await db.apiKeys.add({
+        provider,
+        key, // Store directly for now
+        createdAt: new Date()
+      });
+      
+      console.log('API key saved for provider:', provider);
+    } catch (error) {
+      console.error('Error saving API key:', error);
+      throw new Error(`Falha ao salvar chave de API para ${provider}`);
+    }
   }
 
   static async getAPIKey(provider: string): Promise<string> {
-    const stored = await db.apiKeys.where('provider').equals(provider).first();
-    return stored?.key || '';
+    try {
+      const stored = await db.apiKeys.where('provider').equals(provider).first();
+      const key = stored?.key || '';
+      console.log('API key retrieved for provider:', provider, key ? 'found' : 'not found');
+      return key;
+    } catch (error) {
+      console.error('Error getting API key:', error);
+      throw new Error(`Falha ao obter chave de API para ${provider}`);
+    }
   }
 
   static async getAllAPIKeys(): Promise<APIKeys> {
-    const keys = await db.apiKeys.toArray();
-    const apiKeys: APIKeys = {
-      openai: '',
-      claude: '',
-      gemini: '',
-      grook: '',
-      deepseek: ''
-    };
+    try {
+      const keys = await db.apiKeys.toArray();
+      const apiKeys: APIKeys = {
+        openai: '',
+        claude: '',
+        gemini: '',
+        grook: '',
+        deepseek: ''
+      };
 
-    for (const key of keys) {
-      if (key.provider in apiKeys) {
-        apiKeys[key.provider as keyof APIKeys] = key.key;
+      for (const key of keys) {
+        if (key.provider in apiKeys) {
+          apiKeys[key.provider as keyof APIKeys] = key.key;
+        }
       }
-    }
 
-    return apiKeys;
+      console.log('All API keys retrieved:', Object.keys(apiKeys).filter(k => apiKeys[k as keyof APIKeys]));
+      return apiKeys;
+    } catch (error) {
+      console.error('Error getting all API keys:', error);
+      throw new Error('Falha ao obter chaves de API');
+    }
   }
 
   // New function for price research
